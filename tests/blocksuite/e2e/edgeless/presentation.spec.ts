@@ -9,6 +9,7 @@ import {
   edgelessCommonSetup,
   enterPresentationMode,
   getSelectedBound,
+  getViewportCenter,
   locatorPresentationToolbarButton,
   resizeElementByHandle,
   selectElementInEdgeless,
@@ -16,6 +17,7 @@ import {
   setEdgelessTool,
   Shape,
   switchEditorMode,
+  toggleEditorReadonly,
   toggleFramePanel,
 } from '../utils/actions/edgeless.js';
 import {
@@ -32,6 +34,91 @@ import {
 import { test } from '../utils/playwright.js';
 
 test.describe('presentation', () => {
+  test('frame picker is disabled for an empty presentation', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    await enterPresentationMode(page);
+    const picker = page.getByRole('combobox', { name: 'Go to frame' });
+    await expect(picker).toBeDisabled();
+    await expect(picker.locator('option')).toHaveText('No frames');
+    await locatorPresentationToolbarButton(page, 'next').click();
+    await locatorPresentationToolbarButton(page, 'previous').click();
+    await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
+      '0 / 0'
+    );
+  });
+
+  test('frame picker works in a readonly presentation', async ({ page }) => {
+    await edgelessCommonSetup(page);
+    await createFrame(page, [100, 100], [200, 200]);
+    await createFrame(page, [300, 100], [400, 200]);
+    await toggleEditorReadonly(page);
+    await enterPresentationMode(page);
+    const picker = page.getByRole('combobox', { name: 'Go to frame' });
+    await expect(picker).toBeEnabled();
+    await picker.selectOption({ label: '2. Frame 2' });
+    await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
+      '2 / 2'
+    );
+    await assertEdgelessTool(page, 'frameNavigator');
+  });
+
+  test('frame picker jumps and continues from the selected frame', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    // Deliberately create frames in a different order from their x positions.
+    await createFrame(page, [400, 100], [500, 200]);
+    await createFrame(page, [100, 100], [200, 200]);
+    await createFrame(page, [250, 100], [350, 200]);
+    await enterPresentationMode(page);
+
+    const picker = page.getByRole('combobox', { name: 'Go to frame' });
+    const title = page.locator('.edgeless-frame-navigator-title');
+    const next = locatorPresentationToolbarButton(page, 'next');
+    const previous = locatorPresentationToolbarButton(page, 'previous');
+    await expect(title).toHaveText('Frame 1');
+    await title.click();
+    const initialCenter = await getViewportCenter(page);
+    await expect(picker.locator('option')).toHaveText([
+      '1. Frame 1',
+      '2. Frame 2',
+      '3. Frame 3',
+    ]);
+
+    await picker.selectOption({ label: '3. Frame 3' });
+    await expect(title).toHaveText('Frame 3');
+    await expect.poll(() => getViewportCenter(page)).not.toEqual(initialCenter);
+    await previous.click();
+    await expect(title).toHaveText('Frame 2');
+    await next.click();
+    await expect(title).toHaveText('Frame 3');
+    await picker.selectOption({ label: '1. Frame 1' });
+    await expect(title).toHaveText('Frame 1');
+    await expect.poll(() => getViewportCenter(page)).toEqual(initialCenter);
+  });
+
+  test('frame picker keeps keyboard navigation inside the control', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    await createFrame(page, [100, 100], [200, 200]);
+    await createFrame(page, [300, 100], [400, 200]);
+    await enterPresentationMode(page);
+    const picker = page.getByRole('combobox', { name: 'Go to frame' });
+    await picker.focus();
+    await picker.press('ArrowDown');
+    await expect(page.locator('.edgeless-frame-navigator-title')).toHaveText(
+      'Frame 2'
+    );
+    await picker.press('Escape');
+    await assertEdgelessTool(page, 'frameNavigator');
+    await picker.press('Tab');
+    await pressEscape(page);
+    await assertEdgelessTool(page, 'default');
+  });
+
   test('should render note when enter presentation mode', async ({ page }) => {
     await edgelessCommonSetup(page);
     await createShapeElement(page, [100, 100], [200, 200], Shape.Square);
