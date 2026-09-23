@@ -22,13 +22,13 @@ V0.1 Frame Navigator 已提交，最终 12 项演示测试全部通过。V0.2 �
 
 命令通过仓库自带 `.yarn/releases/yarn-4.18.0.cjs` 执行。
 
-| 检查 | 最终结果 |
-| --- | --- |
-| yarn lint | 退出码 0，格式检查覆盖 7457 个文件 |
-| 改动文件 oxlint --deny-warnings、oxfmt --check | 退出码 0 |
-| yarn typecheck | 依赖初始化结束后重跑，退出码 0 |
-| tsc -b blocksuite/affine/blocks/frame/tsconfig.json tests/blocksuite/tsconfig.json --pretty false | 退出码 0 |
-| yarn workspace @affine-test/blocksuite test edgeless/presentation.spec.ts --workers=1 --timeout=60000 | 12 passed，退出码 0，约 1.7 分钟 |
+| 检查                                                                                                  | 最终结果                           |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| yarn lint                                                                                             | 退出码 0，格式检查覆盖 7457 个文件 |
+| 改动文件 oxlint --deny-warnings、oxfmt --check                                                        | 退出码 0                           |
+| yarn typecheck                                                                                        | 依赖初始化结束后重跑，退出码 0     |
+| tsc -b blocksuite/affine/blocks/frame/tsconfig.json tests/blocksuite/tsconfig.json --pretty false     | 退出码 0                           |
+| yarn workspace @affine-test/blocksuite test edgeless/presentation.spec.ts --workers=1 --timeout=60000 | 12 passed，退出码 0，约 1.7 分钟   |
 
 首次 10 项测试中，原有 Frame 面板排序测试出现一次翻页断言失败。上游原始工具栏单独复测通过，修改版连续复测两次通过，最终完整 12 项测试全部通过。没有修改原用例来掩盖失败；其偶发失败根因尚未确定。
 
