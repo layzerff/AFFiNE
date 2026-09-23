@@ -1,6 +1,6 @@
 # AFFiNE Spatial Presentation 开发需求
 
-日期：2026-09-22。状态：需求与源码分析完成；fork 和功能分支已建立；V0.1 已编写，验证进行中。
+日期：2026-09-22。状态：V0.1 已实现并提交，12 项演示测试通过；V0.2/V0.3 待实施。详见实施与验证记录。
 
 ## 目标与边界
 
@@ -85,6 +85,6 @@
 
 用户已创建 fork：https://github.com/layzerff/AFFiNE 。功能分支 feature/spatial-presentation 已从 canary 建立，基线 d897bb3d84099e54a6b3c0bd5f4265f8aa87d190。
 
-本地 Git clone 多次因 443 连接失败退出，已通过 GitHub 官方 codeload 下载源码压缩包。通过 GitHub Git Data API 可在原始上游历史上提交，无需伪造新的仓库历史。依赖安装进行中；匹配 Node 22 的下载暂时网络超时。现有 Node 24 下的检查结果需注明环境差异。
+本地 Git clone 多次因 443 连接失败退出，已通过官方 codeload 下载源码，并通过 Git Data API 在上游原始历史上提交。Node 24 下全仓 lint、typecheck 和 12 项演示测试通过；Node 22 尚未复验，Electron 下载超时导致桌面打包环境未完成。
 
 V0.1 实现采用原生 select 展示序号与标题，按 Frame ID 查找最新索引，复用已有定位链路。原生控件负责列表、焦点与键盘选择；原有标题入口仍用于重新定位当前 Frame。未额外实现缩略图、多路线或持久化字段。
