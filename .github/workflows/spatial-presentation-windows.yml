@@ -1,0 +1,116 @@
+name: Spatial Presentation Windows Test Build
+
+on:
+  push:
+    branches: [feature/spatial-presentation]
+    paths:
+      - '.github/workflows/spatial-presentation-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: canary
+  RELEASE_VERSION: 0.27.5-spatial.1
+  HUSKY: '0'
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+  SENTRYCLI_SKIP_DOWNLOAD: '1'
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-version
+        with:
+          app-version: ${{ env.RELEASE_VERSION }}
+      - uses: ./.github/actions/setup-node
+        with:
+          electron-install: 'false'
+      - name: Build desktop web assets
+        run: yarn affine @affine/electron generate-assets
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spatial-desktop-web
+          path: packages/frontend/apps/electron/resources/web-static
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    needs: web
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      SKIP_GENERATE_ASSETS: '1'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-version
+        with:
+          app-version: ${{ env.RELEASE_VERSION }}
+      - uses: ./.github/actions/setup-node
+        with:
+          extra-flags: workspaces focus @affine/electron @affine/monorepo @affine/nbstore @toeverything/infra
+          enableScripts: 'true'
+          hard-link-nm: 'false'
+          nmHoistingLimits: workspaces
+      - name: Read Rust version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path rust-toolchain.toml -Pattern 'channel = "([^"]+)"').Matches.Groups[1].Value
+          "RUST_VERSION=$version" >> $env:GITHUB_ENV
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+      - name: Build native module
+        run: yarn workspace @affine/native build --target x86_64-pc-windows-msvc
+      - uses: actions/download-artifact@v4
+        with:
+          name: spatial-desktop-web
+          path: packages/frontend/apps/electron/resources/web-static
+      - name: Build desktop layers
+        run: yarn affine @affine/electron build
+      - name: Remove nested build dependencies
+        shell: pwsh
+        run: |
+          $workspaceRoot = (Resolve-Path .).Path
+          $relativePaths = @(
+            'packages/frontend/apps/electron/node_modules/@affine/nbstore/node_modules/@blocksuite/affine/node_modules',
+            'packages/frontend/apps/electron/node_modules/@affine/native/node_modules'
+          )
+          foreach ($relativePath in $relativePaths) {
+            $targetPath = [IO.Path]::GetFullPath((Join-Path $workspaceRoot $relativePath))
+            if (-not $targetPath.StartsWith($workspaceRoot + [IO.Path]::DirectorySeparatorChar)) { throw 'Cleanup outside workspace' }
+            if (Test-Path -LiteralPath $targetPath) { Remove-Item -LiteralPath $targetPath -Recurse -Force }
+          }
+      - name: Package Windows x64
+        run: yarn affine @affine/electron package --platform=win32 --arch=x64
+        env:
+          HOIST_NODE_MODULES: '1'
+          SKIP_WEB_BUILD: '1'
+          NODE_OPTIONS: --max-old-space-size=12288
+      - name: Make unsigned NSIS installer
+        run: yarn affine @affine/electron make-nsis --arch=x64
+      - name: Verify and checksum installer
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem packages/frontend/apps/electron/out/canary/make/nsis.windows/x64 -Filter *.exe)
+          if ($installers.Count -eq 0) { throw 'NSIS installer missing' }
+          New-Item -ItemType Directory -Force builds | Out-Null
+          foreach ($installer in $installers) {
+            Copy-Item -LiteralPath $installer.FullName -Destination builds
+            $hash = Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256
+            "$($hash.Hash)  $($installer.Name)" | Add-Content builds/SHA256SUMS.txt
+          }
+          "Source commit: ${{ github.sha }}" | Set-Content builds/SOURCE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AFFiNE-Spatial-Presentation-Windows-x64
+          path: builds
+          if-no-files-found: error
+          retention-days: 14
