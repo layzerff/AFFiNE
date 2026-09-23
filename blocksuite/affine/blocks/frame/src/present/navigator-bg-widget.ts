@@ -45,6 +45,14 @@ export class EdgelessNavigatorBlackBackgroundWidget extends WidgetComponent<Root
   override firstUpdated() {
     const { _disposables, gfx } = this;
     _disposables.add(
+      gfx.viewport.viewportUpdated.subscribe(() => this.requestUpdate())
+    );
+    _disposables.add(
+      effect(() => {
+        this._transitioning = gfx.tool.get(PresentTool).transitioning$.value;
+      })
+    );
+    _disposables.add(
       this._slots.navigatorFrameChanged.subscribe(frame => {
         this.frame = frame;
       })
@@ -93,7 +101,7 @@ export class EdgelessNavigatorBlackBackgroundWidget extends WidgetComponent<Root
   override render() {
     const { frame, show, gfx } = this;
 
-    if (!show || !frame) return nothing;
+    if (!show || !frame || this._transitioning) return nothing;
 
     const bound = Bound.deserialize(frame.xywh);
     const zoom = gfx.viewport.zoom;
@@ -111,6 +119,9 @@ export class EdgelessNavigatorBlackBackgroundWidget extends WidgetComponent<Root
       </style>
       <div class="edgeless-navigator-black-background"></div>`;
   }
+
+  @state()
+  private accessor _transitioning = false;
 
   @state()
   private accessor frame: FrameBlockModel | undefined = undefined;

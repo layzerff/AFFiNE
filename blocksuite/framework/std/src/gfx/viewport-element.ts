@@ -703,6 +703,10 @@ export class GfxViewportElement extends WithDisposable(ShadowlessElement) {
         if (payload.type !== 'block' || payload.method !== 'add') return;
         if (!isGfxBlockComponent(payload.view)) return;
 
+        // A view can mount between viewport refreshes (for example during a
+        // camera transition). Include it in the next pass's hide candidates.
+        this._lastVisibleModels?.add(payload.view.model);
+
         const currentSelectedModels = this._getSelectedModels();
         const shouldUseSurvivalMode = shouldUseLowZoomBlockSurvivalMode({
           zoom: this.viewport.zoom,

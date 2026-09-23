@@ -34,6 +34,82 @@ import {
 import { test } from '../utils/playwright.js';
 
 test.describe('presentation', () => {
+  test('frame transition visits intermediate viewports and honors reduced motion', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    await createFrame(page, [100, 100], [200, 200]);
+    await createFrame(page, [400, 300], [600, 500]);
+    await enterPresentationMode(page);
+    await waitNextFrame(page, 500);
+
+    const sampleJump = () =>
+      page
+        .getByRole('combobox', { name: 'Go to frame' })
+        .evaluate(async element => {
+          const root = document.querySelector('affine-edgeless-root');
+          const picker = element as HTMLSelectElement;
+          if (!root || !picker) throw new Error('Missing presentation');
+          const viewport = root.gfx.viewport;
+          const samples: number[][] = [];
+          const subscription = viewport.viewportUpdated.subscribe(() => {
+            samples.push([viewport.centerX, viewport.centerY, viewport.zoom]);
+          });
+          picker.selectedIndex = picker.selectedIndex === 0 ? 1 : 0;
+          picker.dispatchEvent(new Event('change'));
+          await new Promise(resolve => setTimeout(resolve, 450));
+          subscription.unsubscribe();
+          return samples;
+        });
+
+    const animated = await sampleJump();
+    expect(
+      new Set(animated.map(sample => JSON.stringify(sample))).size
+    ).toBeGreaterThan(2);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const instant = await sampleJump();
+    expect(new Set(instant.map(sample => JSON.stringify(sample))).size).toBe(1);
+  });
+
+  test('exiting presentation cancels an in-flight transition', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    await createFrame(page, [100, 100], [200, 200]);
+    await createFrame(page, [400, 300], [600, 500]);
+    await enterPresentationMode(page);
+    await waitNextFrame(page, 500);
+    await locatorPresentationToolbarButton(page, 'next').click();
+    await pressEscape(page);
+    await assertEdgelessTool(page, 'default');
+    await waitNextFrame(page, 500);
+    const center = await getViewportCenter(page);
+    await waitNextFrame(page, 350);
+    expect(await getViewportCenter(page)).toEqual(center);
+  });
+
+  test('rapid frame selections finish at the latest target', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    await createFrame(page, [100, 100], [200, 200]);
+    await createFrame(page, [300, 100], [400, 200]);
+    await createFrame(page, [500, 300], [700, 500]);
+    await enterPresentationMode(page);
+    await waitNextFrame(page, 500);
+    const picker = page.getByRole('combobox', { name: 'Go to frame' });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await picker.selectOption({ label: '3. Frame 3' });
+    const expected = await getViewportCenter(page);
+    await picker.selectOption({ label: '1. Frame 1' });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await picker.selectOption({ label: '2. Frame 2' });
+    await picker.selectOption({ label: '3. Frame 3' });
+    await expect.poll(() => getViewportCenter(page)).toEqual(expected);
+    await waitNextFrame(page, 350);
+    expect(await getViewportCenter(page)).toEqual(expected);
+  });
+
   test('frame picker is disabled for an empty presentation', async ({
     page,
   }) => {

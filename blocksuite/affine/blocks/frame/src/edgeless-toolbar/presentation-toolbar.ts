@@ -135,6 +135,8 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
 
   private _cachedIndex = -1;
 
+  private _animateNextMove = false;
+
   private _timer?: ReturnType<typeof setTimeout>;
 
   override type = PresentTool;
@@ -214,6 +216,7 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
 
   private _moveToCurrentFrame(forceMove = false) {
     const currentToolOption = this.gfx.tool.currentToolOption$.value;
+    if (currentToolOption?.toolType !== PresentTool) return;
     const toolOptions = currentToolOption?.options;
 
     // If PresentTool is being activated after a temporary pan (indicated by restoredAfterPan)
@@ -254,7 +257,8 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
         bound = Bound.fromCenter(center, w, h);
       }
 
-      viewport.setViewportByBound(bound, [0, 0, 0, 0], false);
+      this.gfx.tool.get(PresentTool).moveToFrame(bound, this._animateNextMove);
+      this._animateNextMove = false;
       this.slots.navigatorFrameChanged.next(
         this._frames[this._currentFrameIndex]
       );
@@ -269,7 +273,9 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
     if (this._currentFrameIndex === frames.length - 1) {
       toast(this.host, 'You have reached the last frame');
     } else {
+      this._animateNextMove = true;
       this._currentFrameIndex = clamp(this._currentFrameIndex + 1, min, max);
+      this._cachedIndex = this._currentFrameIndex;
     }
   }
 
@@ -281,7 +287,9 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
     if (this._currentFrameIndex === 0) {
       toast(this.host, 'You have reached the first frame');
     } else {
+      this._animateNextMove = true;
       this._currentFrameIndex = clamp(this._currentFrameIndex - 1, min, max);
+      this._cachedIndex = this._currentFrameIndex;
     }
   }
 
@@ -468,6 +476,7 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
           // Resolve against the live order in case frames changed while open.
           const index = this._frames.findIndex(frame => frame.id === id);
           if (index !== -1) {
+            this._animateNextMove = true;
             this._cachedIndex = index;
             this._currentFrameIndex = index;
           }
