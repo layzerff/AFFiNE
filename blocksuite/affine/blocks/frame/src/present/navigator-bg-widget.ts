@@ -50,6 +50,7 @@ export class EdgelessNavigatorBlackBackgroundWidget extends WidgetComponent<Root
     _disposables.add(
       effect(() => {
         this._transitioning = gfx.tool.get(PresentTool).transitioning$.value;
+        this._roaming = gfx.tool.get(PresentTool).roaming$.value;
       })
     );
     _disposables.add(
@@ -101,7 +102,7 @@ export class EdgelessNavigatorBlackBackgroundWidget extends WidgetComponent<Root
   override render() {
     const { frame, show, gfx } = this;
 
-    if (!show || !frame || this._transitioning) return nothing;
+    if (!show || !frame || this._transitioning || this._roaming) return nothing;
 
     const bound = Bound.deserialize(frame.xywh);
     const zoom = gfx.viewport.zoom;
@@ -119,6 +120,9 @@ export class EdgelessNavigatorBlackBackgroundWidget extends WidgetComponent<Root
       </style>
       <div class="edgeless-navigator-black-background"></div>`;
   }
+
+  @state()
+  private accessor _roaming = false;
 
   @state()
   private accessor _transitioning = false;

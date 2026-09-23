@@ -85,7 +85,8 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       color: var(--affine-text-secondary-color);
       white-space: nowrap;
     }
-    .frame-picker {
+    .frame-picker,
+    .resume-presentation {
       max-width: 160px;
       min-width: 0;
       padding: 4px;
@@ -96,7 +97,8 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       font: inherit;
       text-overflow: ellipsis;
     }
-    .frame-picker:focus-visible {
+    .frame-picker:focus-visible,
+    .resume-presentation:focus-visible {
       outline: 2px solid var(--affine-primary-color);
       outline-offset: 2px;
     }
@@ -506,6 +508,19 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       </edgeless-tool-icon-button>
 
       <div class="full-divider"></div>
+
+      <button
+        class="resume-presentation"
+        aria-label="Resume presentation"
+        title="Return to the current frame"
+        ?disabled=${frames.length === 0 || !this.gfx.tool.get(PresentTool).roaming$.value}
+        @click=${() => {
+          this._animateNextMove = true;
+          this._moveToCurrentFrame(true);
+        }}
+      >
+        Resume
+      </button>
 
       <div class="config-buttons">
         <edgeless-tool-icon-button

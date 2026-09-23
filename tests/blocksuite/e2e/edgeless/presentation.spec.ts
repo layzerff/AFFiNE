@@ -34,6 +34,71 @@ import {
 import { test } from '../utils/playwright.js';
 
 test.describe('presentation', () => {
+  for (const readonly of [false, true]) {
+    test(`drag and resume preserve the presentation path (readonly=${readonly})`, async ({
+      page,
+    }) => {
+      await edgelessCommonSetup(page);
+      await createFrame(page, [100, 100], [200, 200]);
+      await createFrame(page, [400, 300], [600, 500]);
+      if (readonly) await toggleEditorReadonly(page);
+      await enterPresentationMode(page);
+      await waitNextFrame(page, 500);
+      const initial = await getViewportCenter(page);
+      const count = page.locator('.edgeless-frame-navigator-count');
+      const resume = page.getByRole('button', { name: 'Resume presentation' });
+      const mask = page.locator('.edgeless-navigator-black-background');
+      await expect(resume).toBeDisabled();
+      await page.mouse.move(350, 350);
+      await page.mouse.down();
+      await page.mouse.move(500, 430, { steps: 5 });
+      await page.mouse.up();
+      await expect.poll(() => getViewportCenter(page)).not.toEqual(initial);
+      await expect(count).toHaveText('1 / 2');
+      await expect(mask).toBeHidden();
+      await assertEdgelessTool(page, 'frameNavigator');
+      await expect(resume).toBeEnabled();
+      await resume.click();
+      await expect.poll(() => getViewportCenter(page)).toEqual(initial);
+      await expect(mask).toBeVisible();
+      await expect(count).toHaveText('1 / 2');
+
+      await page.mouse.move(350, 350);
+      await page.mouse.down();
+      await page.mouse.move(450, 400, { steps: 3 });
+      await page.mouse.up();
+      await locatorPresentationToolbarButton(page, 'next').click();
+      await expect(count).toHaveText('2 / 2');
+      await expect(resume).toBeDisabled();
+    });
+  }
+
+  test('wheel zoom can be resumed without changing the frame', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    await createFrame(page, [100, 100], [400, 400]);
+    await enterPresentationMode(page);
+    await waitNextFrame(page, 500);
+    const getZoom = () =>
+      page.evaluate(
+        () => document.querySelector('affine-edgeless-root')!.gfx.viewport.zoom
+      );
+    const initialZoom = await getZoom();
+    const initialCenter = await getViewportCenter(page);
+    await page.mouse.move(400, 350);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, 200);
+    await page.keyboard.up('Control');
+    await expect.poll(getZoom).not.toBe(initialZoom);
+    await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
+      '1 / 1'
+    );
+    await page.getByRole('button', { name: 'Resume presentation' }).click();
+    await expect.poll(getZoom).toBe(initialZoom);
+    await expect.poll(() => getViewportCenter(page)).toEqual(initialCenter);
+  });
+
   test('frame transition visits intermediate viewports and honors reduced motion', async ({
     page,
   }) => {

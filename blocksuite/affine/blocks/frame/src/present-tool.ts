@@ -1,4 +1,5 @@
 import type { Bound } from '@blocksuite/global/gfx';
+import type { PointerEventState } from '@blocksuite/std';
 import { BaseTool } from '@blocksuite/std/gfx';
 import { signal } from '@preact/signals-core';
 
@@ -14,6 +15,10 @@ export class PresentTool extends BaseTool<PresentToolOption> {
 
   readonly transitioning$ = signal(false);
 
+  readonly roaming$ = signal(false);
+
+  private _lastPoint: [number, number] | null = null;
+
   private _animation: number | null = null;
 
   cancelTransition() {
@@ -24,6 +29,7 @@ export class PresentTool extends BaseTool<PresentToolOption> {
 
   moveToFrame(bound: Bound, smooth: boolean) {
     this.cancelTransition();
+    this.roaming$.value = false;
     const viewport = this.gfx.viewport;
     if (
       !smooth ||
@@ -71,7 +77,10 @@ export class PresentTool extends BaseTool<PresentToolOption> {
   override mounted() {
     this.disposable.add(
       this.std.event.add('wheel', () => {
-        if (this.active) this.cancelTransition();
+        if (this.active) {
+          this.cancelTransition();
+          this.roaming$.value = true;
+        }
       })
     );
     this.disposable.add(
@@ -83,8 +92,34 @@ export class PresentTool extends BaseTool<PresentToolOption> {
     this.cancelTransition();
   }
 
+  override activate(options: PresentToolOption) {
+    this.roaming$.value = !!options.restoredAfterPan;
+  }
+
+  override dragStart(event: PointerEventState) {
+    this.cancelTransition();
+    this.roaming$.value = true;
+    this._lastPoint = [event.x, event.y];
+  }
+
+  override dragMove(event: PointerEventState) {
+    if (!this._lastPoint) return;
+    const viewport = this.gfx.viewport;
+    viewport.applyDeltaCenter(
+      (this._lastPoint[0] - event.x) / viewport.zoom,
+      (this._lastPoint[1] - event.y) / viewport.zoom
+    );
+    this._lastPoint = [event.x, event.y];
+  }
+
+  override dragEnd() {
+    this._lastPoint = null;
+  }
+
   override deactivate() {
     this.cancelTransition();
+    this._lastPoint = null;
+    this.roaming$.value = false;
   }
 
   override unmounted() {
