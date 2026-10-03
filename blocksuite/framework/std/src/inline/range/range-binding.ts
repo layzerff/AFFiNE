@@ -3,7 +3,7 @@ import throttle from 'lodash-es/throttle';
 
 import { TextSelection } from '../../selection/index.js';
 import { EditorHost } from '../../view/index.js';
-import { isActiveInEditor } from './active.js';
+import { isActiveInEditor, isRangeSyncExcludedTarget } from './active.js';
 import { RANGE_SYNC_EXCLUDE_ATTR } from './consts.js';
 import type { RangeManager } from './range-manager.js';
 /**
@@ -270,6 +270,14 @@ export class RangeBinding {
   };
 
   private readonly _onStdSelectionChanged = (selections: BaseSelection[]) => {
+    // Cursor/awareness updates can arrive after a toolbar control gains focus.
+    // Honor range-sync exclusions across shadow roots before restoring focus.
+    let focused = this.host.ownerDocument.activeElement;
+    while (focused?.shadowRoot?.activeElement) {
+      focused = focused.shadowRoot.activeElement;
+    }
+    if (isRangeSyncExcludedTarget(focused)) return;
+
     // TODO(@mirone): this is a trade-off, we need to use separate awareness store for every store to make sure the selection is isolated.
     const closestHost = document.activeElement?.closest('editor-host');
     if (closestHost && closestHost !== this.host) return;

@@ -95,7 +95,10 @@ export class EdgelessToolbarWidget extends WidgetComponent<RootBlockModel> {
       padding-top: 100px;
       transform: translateY(100px);
     }
-    .edgeless-toolbar-toggle-control[data-enable='true']:hover {
+    /* Keep the native frame picker anchored while it owns focus, without
+       changing the ancestor's transform layer when its popup opens. */
+    .edgeless-toolbar-toggle-control[data-enable='true']:hover,
+    .edgeless-toolbar-toggle-control[data-enable='true']:focus-within {
       padding-top: 0;
       transform: translateY(0);
     }

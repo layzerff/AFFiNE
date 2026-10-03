@@ -34,6 +34,49 @@ import {
 import { test } from '../utils/playwright.js';
 
 test.describe('presentation', () => {
+  test('opening the frame picker keeps the auto-hide transform stable', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    await createFrame(page, [100, 100], [200, 200]);
+    await createFrame(page, [400, 300], [600, 500]);
+    await enterPresentationMode(page);
+    await waitNextFrame(page, 500);
+    await page.locator('.navigator-setting-button').click();
+    await page
+      .locator('.item-container')
+      .filter({ hasText: 'Hide toolbar' })
+      .locator('toggle-switch')
+      .click();
+    await page.locator('.navigator-setting-button').click();
+    const picker = page.getByRole('combobox', { name: 'Go to frame' });
+    const control = page.locator('.edgeless-toolbar-toggle-control');
+    await picker.hover();
+    await expect(control).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await picker.click();
+      await expect(picker).toBeFocused();
+      // Changing the ancestor from a transformed layer to `none` while the
+      // native Windows popup opens can immediately dismiss that popup.
+      await expect(control).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+      await page.keyboard.press('Escape');
+      await page.mouse.move(400, 300);
+      await expect(control).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
+      await picker.press('ArrowDown');
+      await picker.press('Enter');
+      await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
+        '2 / 2'
+      );
+      await page.mouse.click(400, 300);
+      await expect(control).toHaveCSS(
+        'transform',
+        'matrix(1, 0, 0, 1, 0, 100)'
+      );
+      await page.mouse.move(480, 899);
+      await picker.hover();
+    }
+  });
+
   for (const readonly of [false, true]) {
     test(`drag and resume preserve the presentation path (readonly=${readonly})`, async ({
       page,

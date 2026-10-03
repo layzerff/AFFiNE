@@ -463,12 +463,11 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       </div>
 
       <select
+        data-range-sync-exclude="true"
         class="frame-picker ${this.dense ? 'dense' : ''}"
         aria-label="Go to frame"
         title="Go to frame"
         ?disabled=${frames.length === 0}
-        @focus=${() => this.setFrameMenuShow(true)}
-        @blur=${() => this.setFrameMenuShow(false)}
         @pointerdown=${(event: PointerEvent) => event.stopPropagation()}
         @click=${(event: MouseEvent) => event.stopPropagation()}
         @keydown=${(event: KeyboardEvent) => event.stopPropagation()}
