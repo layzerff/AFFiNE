@@ -12,7 +12,7 @@ permissions:
 
 env:
   BUILD_TYPE: canary
-  RELEASE_VERSION: 0.27.5-spatial.1
+  RELEASE_VERSION: 0.27.5-spatial.2
   HUSKY: '0'
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
   SENTRYCLI_SKIP_DOWNLOAD: '1'
@@ -114,3 +114,4 @@ jobs:
           path: builds
           if-no-files-found: error
           retention-days: 14
+
