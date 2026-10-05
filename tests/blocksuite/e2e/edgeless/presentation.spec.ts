@@ -34,7 +34,7 @@ import {
 import { test } from '../utils/playwright.js';
 
 test.describe('presentation', () => {
-  test('opening the frame picker keeps the auto-hide transform stable', async ({
+  test('official frame list stays open with toolbar auto-hide', async ({
     page,
   }) => {
     await edgelessCommonSetup(page);
@@ -49,32 +49,52 @@ test.describe('presentation', () => {
       .locator('toggle-switch')
       .click();
     await page.locator('.navigator-setting-button').click();
-    const picker = page.getByRole('combobox', { name: 'Go to frame' });
-    const control = page.locator('.edgeless-toolbar-toggle-control');
-    await picker.hover();
-    await expect(control).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
-    for (let attempt = 0; attempt < 2; attempt++) {
-      await picker.click();
-      await expect(picker).toBeFocused();
-      // Changing the ancestor from a transformed layer to `none` while the
-      // native Windows popup opens can immediately dismiss that popup.
-      await expect(control).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
-      await page.keyboard.press('Escape');
-      await page.mouse.move(400, 300);
-      await expect(control).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
-      await picker.press('ArrowDown');
-      await picker.press('Enter');
-      await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
-        '2 / 2'
-      );
-      await page.mouse.click(400, 300);
-      await expect(control).toHaveCSS(
-        'transform',
-        'matrix(1, 0, 0, 1, 0, 100)'
-      );
-      await page.mouse.move(480, 899);
-      await picker.hover();
-    }
+    await page.locator('.edgeless-frame-order-button').click();
+    const items = page.locator('edgeless-frame-order-menu .item.draggable');
+    await page.mouse.move(400, 300);
+    await expect(items.first()).toBeVisible();
+    await items.nth(1).click();
+    await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
+      '2 / 2'
+    );
+    await items.first().click();
+    await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
+      '1 / 2'
+    );
+    await expect(page.locator('.frame-picker')).toHaveCount(0);
+  });
+
+  test('right click renames without navigating and Escape cancels editing', async ({
+    page,
+  }) => {
+    await edgelessCommonSetup(page);
+    await createFrame(page, [100, 100], [200, 200]);
+    await createFrame(page, [400, 300], [600, 500]);
+    await enterPresentationMode(page);
+    await waitNextFrame(page, 600);
+    const center = await getViewportCenter(page);
+    await page.locator('.edgeless-frame-order-button').click();
+    const items = page.locator('edgeless-frame-order-menu .item.draggable');
+    await items.nth(1).click({ button: 'right' });
+    const input = page.getByRole('textbox', { name: 'Frame name' });
+    await expect(input).toBeFocused();
+    await input.fill('方案验证');
+    await input.press('ArrowLeft');
+    await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
+      '1 / 2'
+    );
+    await input.press('Enter');
+    await expect(items.nth(1)).toHaveText('方案验证');
+    expect(await getViewportCenter(page)).toEqual(center);
+    await items.nth(1).click({ button: 'right' });
+    await input.fill('cancelled');
+    await input.press('Escape');
+    await expect(items.nth(1)).toHaveText('方案验证');
+    await assertEdgelessTool(page, 'frameNavigator');
+    await items.nth(1).click();
+    await expect(page.locator('.edgeless-frame-navigator-title')).toHaveText(
+      '方案验证'
+    );
   });
 
   for (const readonly of [false, true]) {
@@ -153,28 +173,31 @@ test.describe('presentation', () => {
 
     const sampleJump = () =>
       page
-        .getByRole('combobox', { name: 'Go to frame' })
+        .locator('edgeless-frame-order-menu .item.draggable')
+        .last()
         .evaluate(async element => {
-          const root = document.querySelector('affine-edgeless-root');
-          const picker = element as HTMLSelectElement;
-          if (!root || !picker) throw new Error('Missing presentation');
+          const root = document.querySelector('affine-edgeless-root')!;
           const viewport = root.gfx.viewport;
           const samples: number[][] = [];
           const subscription = viewport.viewportUpdated.subscribe(() => {
             samples.push([viewport.centerX, viewport.centerY, viewport.zoom]);
           });
-          picker.selectedIndex = picker.selectedIndex === 0 ? 1 : 0;
-          picker.dispatchEvent(new Event('change'));
-          await new Promise(resolve => setTimeout(resolve, 450));
+          (element as HTMLElement).click();
+          await new Promise(resolve => setTimeout(resolve, 1100));
           subscription.unsubscribe();
           return samples;
         });
+    await page.locator('.edgeless-frame-order-button').click();
 
     const animated = await sampleJump();
     expect(
       new Set(animated.map(sample => JSON.stringify(sample))).size
     ).toBeGreaterThan(2);
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page
+      .locator('edgeless-frame-order-menu .item.draggable')
+      .first()
+      .click();
     const instant = await sampleJump();
     expect(new Set(instant.map(sample => JSON.stringify(sample))).size).toBe(1);
   });
@@ -205,27 +228,28 @@ test.describe('presentation', () => {
     await createFrame(page, [500, 300], [700, 500]);
     await enterPresentationMode(page);
     await waitNextFrame(page, 500);
-    const picker = page.getByRole('combobox', { name: 'Go to frame' });
+    await page.locator('.edgeless-frame-order-button').click();
+    const picker = page.locator('edgeless-frame-order-menu .item.draggable');
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    await picker.selectOption({ label: '3. Frame 3' });
+    await picker.filter({ hasText: 'Frame 3' }).click();
     const expected = await getViewportCenter(page);
-    await picker.selectOption({ label: '1. Frame 1' });
+    await picker.filter({ hasText: 'Frame 1' }).click();
     await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await picker.selectOption({ label: '2. Frame 2' });
-    await picker.selectOption({ label: '3. Frame 3' });
+    await picker.filter({ hasText: 'Frame 2' }).click();
+    await picker.filter({ hasText: 'Frame 3' }).click();
     await expect.poll(() => getViewportCenter(page)).toEqual(expected);
     await waitNextFrame(page, 350);
     expect(await getViewportCenter(page)).toEqual(expected);
   });
 
-  test('frame picker is disabled for an empty presentation', async ({
+  test('official frame list is disabled for an empty presentation', async ({
     page,
   }) => {
     await edgelessCommonSetup(page);
     await enterPresentationMode(page);
-    const picker = page.getByRole('combobox', { name: 'Go to frame' });
-    await expect(picker).toBeDisabled();
-    await expect(picker.locator('option')).toHaveText('No frames');
+    await page.locator('.edgeless-frame-order-button').click();
+    const picker = page.locator('edgeless-frame-order-menu .item.draggable');
+    await expect(picker).toHaveCount(0);
     await locatorPresentationToolbarButton(page, 'next').click();
     await locatorPresentationToolbarButton(page, 'previous').click();
     await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
@@ -233,22 +257,29 @@ test.describe('presentation', () => {
     );
   });
 
-  test('frame picker works in a readonly presentation', async ({ page }) => {
+  test('official frame list works in a readonly presentation', async ({
+    page,
+  }) => {
     await edgelessCommonSetup(page);
     await createFrame(page, [100, 100], [200, 200]);
     await createFrame(page, [300, 100], [400, 200]);
     await toggleEditorReadonly(page);
     await enterPresentationMode(page);
-    const picker = page.getByRole('combobox', { name: 'Go to frame' });
-    await expect(picker).toBeEnabled();
-    await picker.selectOption({ label: '2. Frame 2' });
+    await page.locator('.edgeless-frame-order-button').click();
+    const picker = page.locator('edgeless-frame-order-menu .item.draggable');
+    await expect(picker.first()).toBeVisible();
+    await picker.last().click({ button: 'right' });
+    await expect(page.getByRole('textbox', { name: 'Frame name' })).toHaveCount(
+      0
+    );
+    await picker.filter({ hasText: 'Frame 2' }).click();
     await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
       '2 / 2'
     );
     await assertEdgelessTool(page, 'frameNavigator');
   });
 
-  test('frame picker jumps and continues from the selected frame', async ({
+  test('official frame list jumps and continues from the selected frame', async ({
     page,
   }) => {
     await edgelessCommonSetup(page);
@@ -258,49 +289,49 @@ test.describe('presentation', () => {
     await createFrame(page, [250, 100], [350, 200]);
     await enterPresentationMode(page);
 
-    const picker = page.getByRole('combobox', { name: 'Go to frame' });
+    await page.locator('.edgeless-frame-order-button').click();
+    const picker = page.locator('edgeless-frame-order-menu .item.draggable');
     const title = page.locator('.edgeless-frame-navigator-title');
     const next = locatorPresentationToolbarButton(page, 'next');
     const previous = locatorPresentationToolbarButton(page, 'previous');
     await expect(title).toHaveText('Frame 1');
     await title.click();
+    await page.locator('.edgeless-frame-order-button').click();
     const initialCenter = await getViewportCenter(page);
-    await expect(picker.locator('option')).toHaveText([
-      '1. Frame 1',
-      '2. Frame 2',
-      '3. Frame 3',
-    ]);
+    await expect(picker).toHaveText(['Frame 1', 'Frame 2', 'Frame 3']);
 
-    await picker.selectOption({ label: '3. Frame 3' });
+    await picker.filter({ hasText: 'Frame 3' }).click();
     await expect(title).toHaveText('Frame 3');
     await expect.poll(() => getViewportCenter(page)).not.toEqual(initialCenter);
     await previous.click();
     await expect(title).toHaveText('Frame 2');
     await next.click();
     await expect(title).toHaveText('Frame 3');
-    await picker.selectOption({ label: '1. Frame 1' });
+    await page.locator('.edgeless-frame-order-button').click();
+    await picker.filter({ hasText: 'Frame 1' }).click();
     await expect(title).toHaveText('Frame 1');
     await expect.poll(() => getViewportCenter(page)).toEqual(initialCenter);
   });
 
-  test('frame picker keeps keyboard navigation inside the control', async ({
+  test('official list supports keyboard activation in a compact toolbar', async ({
     page,
   }) => {
     await edgelessCommonSetup(page);
     await createFrame(page, [100, 100], [200, 200]);
     await createFrame(page, [300, 100], [400, 200]);
+    await page.setViewportSize({ width: 540, height: 900 });
     await enterPresentationMode(page);
-    const picker = page.getByRole('combobox', { name: 'Go to frame' });
-    await picker.focus();
-    await picker.press('ArrowDown');
-    await expect(page.locator('.edgeless-frame-navigator-title')).toHaveText(
-      'Frame 2'
+    await waitNextFrame(page, 600);
+    await page.locator('.edgeless-frame-order-button').click();
+    const item = page
+      .locator('edgeless-frame-order-menu .item.draggable')
+      .last();
+    await item.focus();
+    await item.press('Enter');
+    await expect(page.locator('.edgeless-frame-navigator-count')).toHaveText(
+      '2 / 2'
     );
-    await picker.press('Escape');
     await assertEdgelessTool(page, 'frameNavigator');
-    await picker.press('Tab');
-    await pressEscape(page);
-    await assertEdgelessTool(page, 'default');
   });
 
   test('should render note when enter presentation mode', async ({ page }) => {
@@ -388,6 +419,7 @@ test.describe('presentation', () => {
     await expect(frameItems.nth(2)).toHaveText('Frame 3');
     await expect(frameItems.nth(3)).toHaveText('Frame 4');
 
+    await waitNextFrame(page, 600);
     // 1 2 3 4
     await frameItems.nth(2).dragTo(dragIndicators.nth(0));
     // 3 1 2 4
@@ -405,6 +437,9 @@ test.describe('presentation', () => {
     const currentFrame = page.locator('.edgeless-frame-navigator-title');
     const nextButton = locatorPresentationToolbarButton(page, 'next');
 
+    await expect(currentFrame).toHaveText('Frame 1');
+    expect(await getViewportCenter(page)).toEqual(beforeDrag);
+    await frameItems.first().click();
     await expect(currentFrame).toHaveText('Frame 3');
     await nextButton.click();
     await expect(currentFrame).toHaveText('Frame 4');
@@ -458,6 +493,7 @@ test.describe('presentation', () => {
       await page.mouse.up();
     };
 
+    await waitNextFrame(page, 600);
     // 1 2 3 4
     await drag(2, 0);
     // 3 1 2 4
@@ -614,3 +650,4 @@ test.describe('presentation', () => {
     await expect(navigatorBlackBackground).toBeHidden();
   });
 });
+
