@@ -12,6 +12,7 @@ permissions:
 
 env:
   BUILD_TYPE: canary
+  # spatial.3: official frame layer list integration
   RELEASE_VERSION: 0.27.5-spatial.3
   HUSKY: '0'
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
