@@ -85,7 +85,6 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       color: var(--affine-text-secondary-color);
       white-space: nowrap;
     }
-    .frame-picker,
     .resume-presentation {
       max-width: 160px;
       min-width: 0;
@@ -97,13 +96,9 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       font: inherit;
       text-overflow: ellipsis;
     }
-    .frame-picker:focus-visible,
     .resume-presentation:focus-visible {
       outline: 2px solid var(--affine-primary-color);
       outline-offset: 2px;
-    }
-    .frame-picker.dense {
-      max-width: 100px;
     }
     .edgeless-frame-navigator-stop {
       border: none;
@@ -136,6 +131,8 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
   `;
 
   private _cachedIndex = -1;
+  private _currentFrameId: string | null = null;
+  private _orderOnly = false;
 
   private _animateNextMove = false;
 
@@ -178,8 +175,14 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
 
   private _bindHotKey() {
     const handleKeyIfFrameNavigator = (action: () => void) => () => {
-      // Native select keyboard navigation must not also advance the presentation.
-      if (this.shadowRoot?.activeElement instanceof HTMLSelectElement) return;
+      let focused = this.ownerDocument.activeElement;
+      while (focused?.shadowRoot?.activeElement)
+        focused = focused.shadowRoot.activeElement;
+      if (
+        focused instanceof HTMLInputElement ||
+        focused instanceof HTMLTextAreaElement
+      )
+        return;
       if (this.edgelessTool.toolType === PresentTool) {
         action();
       }
@@ -243,6 +246,7 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
     const frame = this._frames[current];
 
     if (frame) {
+      this._currentFrameId = frame.id;
       let bound = Bound.deserialize(frame.xywh);
 
       if (this._navigatorMode === 'fill') {
@@ -276,6 +280,8 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       toast(this.host, 'You have reached the last frame');
     } else {
       this._animateNextMove = true;
+      this._currentFrameId =
+        frames[clamp(this._currentFrameIndex + 1, min, max)].id;
       this._currentFrameIndex = clamp(this._currentFrameIndex + 1, min, max);
       this._cachedIndex = this._currentFrameIndex;
     }
@@ -290,6 +296,8 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       toast(this.host, 'You have reached the first frame');
     } else {
       this._animateNextMove = true;
+      this._currentFrameId =
+        frames[clamp(this._currentFrameIndex - 1, min, max)].id;
       this._currentFrameIndex = clamp(this._currentFrameIndex - 1, min, max);
       this._cachedIndex = this._currentFrameIndex;
     }
@@ -317,6 +325,16 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
     super.connectedCallback();
 
     const { _disposables } = this;
+    _disposables.addFromEvent(this, 'frame-navigate', event => {
+      const id = (event as CustomEvent<string>).detail;
+      const index = this._frames.findIndex(frame => frame.id === id);
+      if (index === -1) return;
+      clearTimeout(this._timer);
+      this._currentFrameId = id;
+      this._animateNextMove = true;
+      this._cachedIndex = index;
+      this._currentFrameIndex = index;
+    });
 
     _disposables.add(
       effect(() => {
@@ -419,6 +437,15 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
   }
 
   protected override willUpdate() {
+    // Reordering changes the counter, never the camera or the active frame.
+    const index = this._frames.findIndex(
+      frame => frame.id === this._currentFrameId
+    );
+    this._orderOnly = index !== -1 && index !== this._currentFrameIndex;
+    if (this._orderOnly) {
+      this._currentFrameIndex = index;
+      this._cachedIndex = index;
+    }
     // A collaborator may remove the last frame while the navigator is open.
     const max = Math.max(0, this._frames.length - 1);
     if (this._currentFrameIndex > max) this._currentFrameIndex = max;
@@ -462,41 +489,6 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
         </span>
       </div>
 
-      <select
-        data-range-sync-exclude="true"
-        class="frame-picker ${this.dense ? 'dense' : ''}"
-        aria-label="Go to frame"
-        title="Go to frame"
-        ?disabled=${frames.length === 0}
-        @pointerdown=${(event: PointerEvent) => event.stopPropagation()}
-        @click=${(event: MouseEvent) => event.stopPropagation()}
-        @keydown=${(event: KeyboardEvent) => event.stopPropagation()}
-        @wheel=${(event: WheelEvent) => event.stopPropagation()}
-        @change=${(event: Event) => {
-          const id = (event.currentTarget as HTMLSelectElement).value;
-          // Resolve against the live order in case frames changed while open.
-          const index = this._frames.findIndex(frame => frame.id === id);
-          if (index !== -1) {
-            this._animateNextMove = true;
-            this._cachedIndex = index;
-            this._currentFrameIndex = index;
-          }
-        }}
-      >
-        ${
-          frames.length === 0
-            ? html`<option>No frames</option>`
-            : frames.map(
-                (item, index) => html`
-                  <option value=${item.id} .selected=${index === current}>
-                    ${index + 1}.
-                    ${item.props.title.toString() || 'Untitled frame'}
-                  </option>
-                `
-              )
-        }
-      </select>
-
       <edgeless-tool-icon-button
         .tooltip=${'Next'}
         @click=${() => this._nextFrame()}
@@ -536,16 +528,12 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
           ${document.fullscreenElement ? ExpandCloseIcon() : ExpandFullIcon()}
         </edgeless-tool-icon-button>
 
-        ${
-          this.dense
-            ? nothing
-            : html`<edgeless-frame-order-button
-                .popperShow=${this.frameMenuShow}
-                .setPopperShow=${this.setFrameMenuShow}
-                .edgeless=${this.edgeless}
-              >
-              </edgeless-frame-order-button>`
-        }
+        <edgeless-frame-order-button
+          .activeFrameId=${frame?.id ?? null}
+          .popperShow=${this.frameMenuShow}
+          .setPopperShow=${this.setFrameMenuShow}
+          .edgeless=${this.edgeless}
+        ></edgeless-frame-order-button>
 
         <edgeless-navigator-setting-button
           .edgeless=${this.edgeless}
@@ -555,7 +543,7 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
           }}
           .popperShow=${this.settingMenuShow}
           .setPopperShow=${this.setSettingMenuShow}
-          .includeFrameOrder=${this.dense}
+          .includeFrameOrder=${false}
         >
         </edgeless-navigator-setting-button>
       </div>
@@ -580,6 +568,10 @@ export class PresentationToolbar extends EdgelessToolbarToolMixin(
       isPresentToolActive && toolOptions?.restoredAfterPan
     );
 
+    if (this._orderOnly) {
+      this._orderOnly = false;
+      return;
+    }
     if (changedProperties.has('_currentFrameIndex') && isPresentToolActive) {
       // When the current frame index changes (e.g., user navigates), a viewport update is needed.
       // However, if PresentTool is merely being restored after a pan (isRestoredAfterPan = true)
@@ -650,3 +642,4 @@ function launchIntoFullscreen(element: Element) {
     element.msRequestFullscreen();
   }
 }
+
