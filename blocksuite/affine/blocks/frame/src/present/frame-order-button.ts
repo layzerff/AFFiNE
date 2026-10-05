@@ -38,26 +38,22 @@ export class EdgelessFrameOrderButton extends WithDisposable(LitElement) {
   }
 
   protected override render() {
-    const { readonly } = this.edgeless.store;
     return html`
-      <style>
-        .edgeless-frame-order-button svg {
-          color: ${readonly ? 'var(--affine-text-disable-color)' : 'inherit'};
-        }
-      </style>
       <edgeless-tool-icon-button
         class="edgeless-frame-order-button"
         .iconSize=${'24px'}
         .tooltip=${this.popperShow ? '' : 'Frame Order'}
         @click=${() => {
-          if (readonly) return;
           this._edgelessFrameOrderPopper?.toggle();
         }}
         .iconContainerPadding=${0}
       >
         ${LayerIcon()}
       </edgeless-tool-icon-button>
-      <edgeless-frame-order-menu .edgeless=${this.edgeless}>
+      <edgeless-frame-order-menu
+        .edgeless=${this.edgeless}
+        .activeFrameId=${this.activeFrameId}
+      >
       </edgeless-frame-order-menu>
     `;
   }
@@ -78,5 +74,9 @@ export class EdgelessFrameOrderButton extends WithDisposable(LitElement) {
   accessor popperShow = false;
 
   @property({ attribute: false })
+  accessor activeFrameId: string | null = null;
+
+  @property({ attribute: false })
   accessor setPopperShow: (show: boolean) => void = () => {};
 }
+
