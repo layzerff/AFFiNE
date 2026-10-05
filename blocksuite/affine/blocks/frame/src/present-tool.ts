@@ -50,10 +50,27 @@ export class PresentTool extends BaseTool<PresentToolOption> {
       viewport.ZOOM_MAX,
       0
     );
+    // Measure travel in viewport widths so large and small canvases feel alike.
+    const distance = Math.hypot(
+      target.centerX - start.x,
+      target.centerY - start.y
+    );
+    const span = Math.max(
+      1,
+      Math.min(viewport.viewportBounds.w, viewport.viewportBounds.h)
+    );
+    const travel = distance / span;
+    const zoomTravel = Math.abs(Math.log(target.zoom / start.zoom));
+    const duration = Math.min(
+      1000,
+      360 + 180 * Math.log1p(travel) + 100 * zoomTravel
+    );
+    // A restrained pullback retains spatial context on long jumps.
+    const pullback = Math.min(0.65, Math.max(0, travel - 0.75) * 0.18);
     const started = performance.now();
     this.transitioning$.value = true;
     const step = (now: number) => {
-      const progress = Math.min(1, (now - started) / 300);
+      const progress = Math.min(1, (now - started) / duration);
       if (progress === 1) {
         // Use the existing fit calculation for the exact final viewport.
         viewport.setViewportByBound(bound, [0, 0, 0, 0], false);
@@ -61,9 +78,14 @@ export class PresentTool extends BaseTool<PresentToolOption> {
         this.transitioning$.value = false;
         return;
       }
-      const eased = progress * progress * (3 - 2 * progress);
+      const eased = progress ** 3 * (10 + progress * (-15 + 6 * progress));
       viewport.setViewport(
-        start.zoom * Math.pow(target.zoom / start.zoom, eased),
+        Math.max(
+          viewport.ZOOM_MIN,
+          start.zoom *
+            Math.pow(target.zoom / start.zoom, eased) *
+            Math.exp(-pullback * Math.sin(Math.PI * eased) ** 2)
+        ),
         [
           start.x + (target.centerX - start.x) * eased,
           start.y + (target.centerY - start.y) * eased,
@@ -127,3 +149,4 @@ export class PresentTool extends BaseTool<PresentToolOption> {
     this.disposable.dispose();
   }
 }
+
