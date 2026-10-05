@@ -42,7 +42,8 @@ export class EdgelessFrameOrderMenu extends SignalWatcher(
       display: flex;
       gap: 4px;
       align-items: center;
-      cursor: grab;
+      cursor: pointer;
+      touch-action: none;
     }
 
     .draggable:hover {
@@ -54,7 +55,7 @@ export class EdgelessFrameOrderMenu extends SignalWatcher(
     }
 
     .drag-indicator {
-      cursor: pointer;
+      cursor: grab;
       width: 4px;
       height: 12px;
       border-radius: 1px;
@@ -74,6 +75,20 @@ export class EdgelessFrameOrderMenu extends SignalWatcher(
       text-overflow: ellipsis;
     }
 
+    input {
+      width: 100%;
+      min-width: 0;
+      font: inherit;
+      color: inherit;
+      background: var(--affine-background-primary-color);
+      border: 1px solid var(--affine-primary-color);
+    }
+    .item[aria-current='true'] {
+      background: var(--affine-hover-color);
+    }
+    .item:focus-visible {
+      outline: 2px solid var(--affine-primary-color);
+    }
     .clone {
       visibility: hidden;
       position: absolute;
@@ -109,103 +124,161 @@ export class EdgelessFrameOrderMenu extends SignalWatcher(
     return this._frameMgr.frames;
   }
 
-  private _bindEvent() {
-    const { _disposables } = this;
+  private _drag?: DisposableGroup;
+  private _suppressClick = false;
 
-    _disposables.addFromEvent(this._container, 'wheel', e => {
-      e.stopPropagation();
+  @state()
+  private accessor _editingId: string | null = null;
+
+  private _navigate(id: string) {
+    this.dispatchEvent(
+      new CustomEvent('frame-navigate', {
+        detail: id,
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  private async _rename(id: string) {
+    if (this.edgeless.store.readonly) return;
+    this._editingId = id;
+    await this.updateComplete;
+    const input = this.renderRoot.querySelector<HTMLInputElement>('input');
+    input?.focus();
+    input?.select();
+  }
+
+  private _finishRename(input: HTMLInputElement, save: boolean) {
+    const frame = this._frames.find(frame => frame.id === this._editingId);
+    this._editingId = null;
+    const value = input.value.trim();
+    if (
+      !save ||
+      !frame ||
+      !value ||
+      this.edgeless.store.readonly ||
+      value === frame.props.title.toString()
+    )
+      return;
+    this.edgeless.store.captureSync();
+    this.edgeless.store.transact(() => {
+      const title = frame.props.title.yText;
+      title.delete(0, title.length);
+      title.insert(0, value);
     });
+    this.edgeless.store.captureSync();
+  }
 
-    _disposables.addFromEvent(this._container, 'pointerdown', e => {
-      const ele = e.target as HTMLElement;
-      const draggable = ele.closest('.draggable');
-      if (!draggable) return;
-      const clone = this._clone;
-      const indicatorLine = this._indicatorLine;
-      clone.style.visibility = 'visible';
-
-      const rect = draggable.getBoundingClientRect();
-
-      const index = Number(draggable.getAttribute('index'));
-      this._curIndex = index;
-      let newIndex = -1;
-
-      const containerRect = this._container.getBoundingClientRect();
-      const start = containerRect.top + 8;
-      const end = containerRect.bottom;
-
-      const shiftX = e.clientX - rect.left;
-      const shiftY = e.clientY - rect.top;
-      function moveAt(x: number, y: number) {
-        clone.style.left = x - containerRect.left - shiftX + 'px';
-        clone.style.top = y - containerRect.top - shiftY + 'px';
-      }
-
-      function isInsideContainer(e: PointerEvent) {
-        return e.clientY >= start && e.clientY <= end;
-      }
-      moveAt(e.clientX, e.clientY);
-
-      this._disposables.addFromEvent(document, 'pointermove', e => {
-        indicatorLine.style.visibility = 'visible';
-        moveAt(e.clientX, e.clientY);
-        if (isInsideContainer(e)) {
-          const relativeY = e.pageY + this._container.scrollTop - start;
-          let top = 0;
-          if (relativeY < rect.height / 2) {
-            newIndex = 0;
-            top = this.embed ? -2 : 4;
-          } else {
-            newIndex = Math.ceil(
-              (relativeY - rect.height / 2) / (rect.height + 10)
-            );
-            top =
-              (this.embed ? -2 : 7.5) +
-              newIndex * rect.height +
-              (newIndex - 0.5) * 4;
-          }
-
-          indicatorLine.style.top = top - this._container.scrollTop + 'px';
+  private _bindEvent() {
+    this._disposables.addFromEvent(this._container, 'wheel', e =>
+      e.stopPropagation()
+    );
+    this._disposables.addFromEvent(this._container, 'pointerdown', e => {
+      e.stopPropagation();
+      this._suppressClick = false;
+      if (e.button !== 0 || this.edgeless.store.readonly || this._editingId)
+        return;
+      const row = (e.target as HTMLElement).closest<HTMLElement>('.draggable');
+      if (!row) return;
+      e.preventDefault();
+      row.focus();
+      this._drag?.dispose();
+      const drag = (this._drag = new DisposableGroup());
+      const id = row.id;
+      const rect = row.getBoundingClientRect();
+      const startX = e.clientX,
+        startY = e.clientY;
+      let dragging = false;
+      let beforeId: string | null | undefined;
+      this._curIndex = this._frames.findIndex(frame => frame.id === id);
+      const cleanup = () => {
+        this._clone.style.visibility = 'hidden';
+        this._indicatorLine.style.visibility = 'hidden';
+        drag.dispose();
+        this._drag = undefined;
+      };
+      drag.addFromEvent(this.ownerDocument, 'pointermove', move => {
+        if (move.pointerId !== e.pointerId) return;
+        if (
+          !dragging &&
+          Math.hypot(move.clientX - startX, move.clientY - startY) < 5
+        )
+          return;
+        dragging = true;
+        this._suppressClick = true;
+        move.preventDefault();
+        const container = this._container.getBoundingClientRect();
+        const host = this.getBoundingClientRect();
+        this._clone.style.visibility = 'visible';
+        this._clone.style.left =
+          move.clientX - host.left - (startX - rect.left) + 'px';
+        this._clone.style.top =
+          move.clientY - host.top - (startY - rect.top) + 'px';
+        if (
+          move.clientY < container.top ||
+          move.clientY > container.bottom ||
+          move.clientX < container.left ||
+          move.clientX > container.right
+        ) {
+          beforeId = undefined;
+          this._indicatorLine.style.visibility = 'hidden';
           return;
         }
-        newIndex = -1;
+        if (move.clientY < container.top + 24) this._container.scrollTop -= 12;
+        if (move.clientY > container.bottom - 24)
+          this._container.scrollTop += 12;
+        const rows = [
+          ...this._container.querySelectorAll<HTMLElement>('.draggable'),
+        ];
+        const next = rows.find(item => {
+          const r = item.getBoundingClientRect();
+          return move.clientY <= r.top + r.height / 2 + 1;
+        });
+        beforeId = next?.id ?? null;
+        const top =
+          next?.getBoundingClientRect().top ??
+          rows.at(-1)!.getBoundingClientRect().bottom;
+        this._indicatorLine.style.visibility = 'visible';
+        this._indicatorLine.style.top = top - host.top - 2 + 'px';
       });
-
-      this._disposables.addFromEvent(document, 'pointerup', () => {
-        clone.style.visibility = 'hidden';
-        indicatorLine.style.visibility = 'hidden';
+      drag.addFromEvent(this.ownerDocument, 'pointerup', up => {
+        if (up.pointerId !== e.pointerId) return;
+        cleanup();
         if (
-          newIndex >= 0 &&
-          newIndex <= this._frames.length &&
-          newIndex !== index &&
-          newIndex !== index + 1
-        ) {
-          const frameMgr = this._frameMgr;
-          // Legacy compatibility
-          frameMgr.refreshLegacyFrameOrder();
-
-          const before =
-            this._frames[newIndex - 1]?.props.presentationIndex || null;
-          const after = this._frames[newIndex]?.props.presentationIndex || null;
-
-          const frame = this._frames[index];
-
-          this.crud.updateElement(frame.id, {
-            presentationIndex: generateKeyBetweenV2(before, after),
-          });
-          this.edgeless.store.captureSync();
-
-          this.requestUpdate();
-        }
-        this._disposables.dispose();
-        this._disposables = new DisposableGroup();
-        this._bindEvent();
+          !dragging ||
+          beforeId === undefined ||
+          beforeId === id ||
+          this.edgeless.store.readonly
+        )
+          return;
+        const frames = this._frames;
+        if (!frames.some(frame => frame.id === id)) return;
+        const remaining = frames.filter(frame => frame.id !== id);
+        const index =
+          beforeId === null
+            ? remaining.length
+            : remaining.findIndex(frame => frame.id === beforeId);
+        if (index < 0 || frames.findIndex(frame => frame.id === id) === index)
+          return;
+        this.edgeless.store.captureSync();
+        this._frameMgr.refreshLegacyFrameOrder();
+        this.crud.updateElement(id, {
+          presentationIndex: generateKeyBetweenV2(
+            remaining[index - 1]?.props.presentationIndex || null,
+            remaining[index]?.props.presentationIndex || null
+          ),
+        });
+        this.edgeless.store.captureSync();
+        this.requestUpdate();
       });
+      drag.addFromEvent(this.ownerDocument, 'pointercancel', cleanup);
     });
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    this._drag?.dispose();
     this._disposables.dispose();
   }
 
@@ -221,15 +294,67 @@ export class EdgelessFrameOrderMenu extends SignalWatcher(
         class="edgeless-frame-order-items-container ${
           this.embed ? 'embed' : ''
         }"
+        data-range-sync-exclude="true"
+        @keydown=${(e: KeyboardEvent) => e.stopPropagation()}
         @click=${(e: MouseEvent) => e.stopPropagation()}
       >
         ${repeat(
           this._frames,
           frame => frame.id,
           (frame, index) => html`
-            <div class="item draggable" id=${frame.id} index=${index}>
+            <div
+              class="item draggable"
+              id=${frame.id}
+              index=${index}
+              aria-current=${frame.id === this.activeFrameId ? 'true' : 'false'}
+              role="button"
+              tabindex="0"
+              aria-label=${frame.props.title.toString() || 'Untitled frame'}
+              @click=${() => {
+                if (!this._suppressClick && !this._editingId)
+                  this._navigate(frame.id);
+              }}
+              @contextmenu=${(event: MouseEvent) => {
+                event.preventDefault();
+                event.stopPropagation();
+                this._rename(frame.id).catch(console.error);
+              }}
+              @keydown=${(event: KeyboardEvent) => {
+                if (this._editingId) return;
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  this._navigate(frame.id);
+                } else if (event.key === 'F2') {
+                  event.preventDefault();
+                  this._rename(frame.id).catch(console.error);
+                }
+              }}
+            >
               <div class="drag-indicator"></div>
-              <div class="title">${frame.props.title.toString()}</div>
+              ${
+                this._editingId === frame.id
+                  ? html` <input
+                      aria-label="Frame name"
+                      data-range-sync-exclude="true"
+                      .value=${frame.props.title.toString()}
+                      @click=${(event: MouseEvent) => event.stopPropagation()}
+                      @blur=${(event: FocusEvent) => this._finishRename(event.target as HTMLInputElement, true)}
+                      @keydown=${(event: KeyboardEvent) => {
+                        event.stopPropagation();
+                        if (event.isComposing) return;
+                        if (event.key === 'Enter' || event.key === 'Escape') {
+                          event.preventDefault();
+                          this._finishRename(
+                            event.target as HTMLInputElement,
+                            event.key === 'Enter'
+                          );
+                        }
+                      }}
+                    />`
+                  : html`<div class="title">
+                      ${frame.props.title.toString() || 'Untitled frame'}
+                    </div>`
+              }
             </div>
           `
         )}
@@ -264,4 +389,8 @@ export class EdgelessFrameOrderMenu extends SignalWatcher(
 
   @property({ attribute: false })
   accessor embed = false;
+
+  @property({ attribute: false })
+  accessor activeFrameId: string | null = null;
 }
+
